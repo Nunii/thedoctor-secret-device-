@@ -2,16 +2,29 @@ language: python
 python:
   - "3.11"
 
+branches:
+  only:
+    - master
+    - private/anuni
+
 services:
   - docker
 
 env:
   global:
-    - DOCKER_IMAGE_NAME=$DOCKER_USERNAME/secret-device
+    - DOCKER_IMAGE_NAME=$DOCKER_USERNAME_ENCRYPTED/secret-device
     - DOCKER_TAG=latest
+    - DOCKER_HUB_LINK=https://hub.docker.com/r/$DOCKER_USERNAME_ENCRYPTED/secret-device
+    - GITHUB_PROJECT_LINK=https://github.com/$TRAVIS_REPO_SLUG
 
 before_install:
-  - docker login -u $DOCKER_USERNAME_ENCRYPTED -p $DOCKER_PASSWORD_ENCRYPTED
+  # Install Docker Compose
+  - sudo rm /usr/local/bin/docker-compose
+  - curl -L https://github.com/docker/compose/releases/download/1.25.0/docker-compose-`uname -s`-`uname -m` > docker-compose
+  - chmod +x docker-compose
+  - sudo mv docker-compose /usr/local/bin
+  # Login to Docker Hub
+  - echo "$DOCKER_PASSWORD_ENCRYPTED" | docker login -u "$DOCKER_USERNAME_ENCRYPTED" --password-stdin
 
 install:
   - pip install -r requirements.txt
@@ -20,18 +33,25 @@ install:
 script:
   # Run tests
   - pytest --cov=app test/
-  # Build Docker image
-  - docker build -t $DOCKER_IMAGE_NAME:$DOCKER_TAG .
-  # Test Docker container
-  - docker run -d -p 5000:5000 --name test-container $DOCKER_IMAGE_NAME:$DOCKER_TAG
+  # Build and test with Docker Compose
+  - docker-compose build
+  - docker-compose up -d
   - sleep 5
+  # Test endpoints
   - curl -f http://localhost:5000/health
-  - docker stop test-container
-  - docker rm test-container
+  - curl -f http://localhost:5000/secret
+  - docker-compose down
 
 after_success:
   # Push Docker image to Docker Hub
   - docker push $DOCKER_IMAGE_NAME:$DOCKER_TAG
-  # Update health endpoint with Docker Hub link
-  - echo "DOCKER_HUB_LINK=https://hub.docker.com/r/$DOCKER_IMAGE_NAME" >> .env
-  - echo "GITHUB_PROJECT_LINK=https://github.com/$TRAVIS_REPO_SLUG" >> .env
+  # Create .env file with links for production
+  - |
+    cat > .env << EOL
+    AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID_ENCRYPTED
+    AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY_ENCRYPTED
+    AWS_REGION=$AWS_REGION_ENCRYPTED
+    CODE_NAME=$CODE_NAME_ENCRYPTED
+    DOCKER_HUB_LINK=$DOCKER_HUB_LINK
+    GITHUB_PROJECT_LINK=$GITHUB_PROJECT_LINK
+    EOL
