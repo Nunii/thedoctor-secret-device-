@@ -1,0 +1,88 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - master
+      - private/anuni
+
+env:
+  DOCKER_IMAGE_NAME: ${{ vars.DOCKER_USERNAME }}/secret-device
+  DOCKER_TAG: latest
+  DOCKER_HUB_LINK: https://hub.docker.com/r/amitnu/secret-device
+  GITHUB_PROJECT_LINK: https://github.com/${{ github.repository }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run tests
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+        CODE_NAME: ${{ secrets.CODE_NAME }}
+      run: pytest --cov=app test/
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Install Docker Compose
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates curl gnupg
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+        echo \
+          "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+          "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update
+        sudo apt-get install -y docker-compose
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ vars.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+
+    - name: Create .env file
+      run: |
+        cat > .env << EOL
+        AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION=${{ secrets.AWS_REGION }}
+        CODE_NAME=${{ secrets.CODE_NAME }}
+        DOCKER_HUB_LINK=https://hub.docker.com/r/amitnu/secret-device
+        GITHUB_PROJECT_LINK=${{ env.GITHUB_PROJECT_LINK }}
+        EOL
+
+    - name: Build and test with Docker Compose
+      run: |
+        docker-compose build
+        docker-compose up -d
+        sleep 5
+        curl -f http://localhost:5000/health
+        curl -f http://localhost:5000/secret
+        docker-compose down
+
+    - name: Tag and push Docker image
+      run: |
+        docker images
+        docker tag secret-device-service_web:${{ env.DOCKER_TAG }} ${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+        docker push ${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }} 
