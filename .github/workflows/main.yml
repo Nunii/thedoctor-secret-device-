@@ -72,14 +72,11 @@ jobs:
         GITHUB_PROJECT_LINK=${{ env.GITHUB_PROJECT_LINK }}
         EOL
 
-    - name: Build and test with Docker Compose
-      run: |
-        docker-compose build
-        docker-compose up -d
-        sleep 5
-        curl -f http://localhost:5000/health
-        curl -f http://localhost:5000/secret
-        docker-compose down
+    - name: Make verification script executable
+      run: chmod +x verification.sh
+
+    - name: Build and test
+      run: ./verification.sh
 
     - name: Tag and push Docker image
       run: |

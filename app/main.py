@@ -11,6 +11,33 @@ dynamodb_client = DynamoDBClient()
 
 @app.get("/health")
 async def health_check():
+    # Check required environment variables
+    required_vars = ["DOCKER_HUB_LINK", "GITHUB_PROJECT_LINK", "AWS_ACCESS_KEY_ID", 
+                    "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "CODE_NAME"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    if missing_vars:
+        return {
+            "status": "unhealthy",
+            "container": os.getenv("DOCKER_HUB_LINK", "not_set"),
+            "project": os.getenv("GITHUB_PROJECT_LINK", "not_set"),
+            "error": f"Missing environment variables: {', '.join(missing_vars)}"
+        }
+    
+    # Check DynamoDB connection
+    try:
+        # Try to get the secret code to verify DynamoDB connection
+        code_name = os.getenv("CODE_NAME")
+        dynamodb_client.get_secret_code(code_name)
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "container": os.getenv("DOCKER_HUB_LINK", "not_set"),
+            "project": os.getenv("GITHUB_PROJECT_LINK", "not_set"),
+            "error": f"DynamoDB connection failed: {str(e)}"
+        }
+    
+    # All checks passed
     return {
         "status": "healthy",
         "container": os.getenv("DOCKER_HUB_LINK", "not_set"),
